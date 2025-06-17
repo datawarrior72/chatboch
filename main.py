@@ -1,86 +1,88 @@
-import os
 import streamlit as st
-from google import genai
+import google.generativeai as genai
 
-# impor
-
-
-# ───────── 1. Récupération sécurisée de la clé API ─────────
-def get_api_key() -> str | None:
-    """
-    Recherche la clé dans l'ordre de priorité suivant :
-    1. st.secrets["GOOGLE_API_KEY"] (fichier secrets.toml ou réglage Streamlit Cloud)
-    2. Variable d'environnement GOOGLE_API_KEY
-    """
-    if "GOOGLE_API_KEY" in st.secrets:  # priorité 1
-        return st.secrets["GOOGLE_API_KEY"]
-
-
-API_KEY = get_api_key()
-
-if not API_KEY:
-    st.error(
-        "Clé GOOGLE_API_KEY manquante. "
-        "Ajoutez‑la dans st.secrets ou comme variable d’environnement."
-    )
+if "google" not in st.secrets or "API_KEY" not in st.secrets["google"]:
+    st.error("Clé API manquante dans secrets.toml")
     st.stop()
 
-client = genai.Client(api_key=API_KEY)  # Client Gemini
+# Config de l'API
+genai.configure(api_key=st.secrets.google.API_KEY)
 
-# ───────── 2. Prompt système & création du chat ──────────
-SYSTEM_PROMPT = (
-    "Tu es un spécialiste de l'animation pour les EHPAD. "
-    "Ton objectif : améliorer la motricité et le bien‑être des résidents. "
-    "Propose des activités adaptées (PMR inclus)…"
-)
+# Prompt système
+system_prompt = """lorsque tu reponds soit précis et concis, lors de la première reponse fait un bref résumer et précise sur 
+quelle tu travail il faut que tes reponses soient variés pour ne pas avoir l'impression de faire toujours meme chose
+et demande si besoin à l'utilisateur de détaillé ta réponse
+Tu es un spécialiste de l'animation pour les EHPAD.
+Ton objectif : améliorer la motricité et le bien‑être des résidents, timulation cognitive, Maintien de la motricité,
+Création de lien social, Amélioration du bien-être émotionnel.
+Propose des activités adaptées (PMR inclus)…
+souvent pas de budget pour les manifestations
+propose des sites avec des activités ludiques sur lesquels je peux m'appuyer et donnes des exemples
+leur age varie de 65 ans à 105 ans, pathologies spécifiques fréquentes (Alzheimer, Parkinson, problèmes articulaires, etc)
+en général, les residents aime bien la médiation animal.
+si la question ne porte pas sur l'animation et le bien être des personnes agées, réponds que tu ne réponds que sur l'animation
 
 
+"""
+
+
+# Fonction pour initialiser le chat
 def init_chat():
-    history = [
-        {"role": "user", "parts": [{"text": SYSTEM_PROMPT}]},
-        {
-            "role": "model",
-            "parts": [{"text": "Compris ! Posez votre première question."}],
-        },
-    ]
-    return client.chats.create(model="gemini-2.0-flash-001", history=history)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    chat = model.start_chat(
+        history=[
+            {"role": "user", "parts": [system_prompt]},
+            {
+                "role": "model",
+                "parts": ["Comment puis-je vous aider aujourdh'hui Gwladys ."],
+            },
+        ]
+    )
+    return chat
 
 
-# ───────── 3. Initialisation de l’état Streamlit ─────────
+# Initialisation du chat
 if "chat" not in st.session_state:
     st.session_state.chat = init_chat()
     st.session_state.messages = [
         {
             "role": "assistant",
-            "text": "Bonjour ! Comment puis‑je vous aider pour l’animation en EHPAD ?",
-        },
+            "text": "Je suis prêt pour t'aider ... 🔎 ",
+        }
     ]
 
-# ───────── 4. Affichage de l’historique ────────────────
+# Affichage de la discussion
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["text"])
 
-# ───────── 5. Entrée utilisateur + streaming ───────────
-user_input = st.chat_input("Posez votre question…")
+# Champ de saisie
+user_input = st.chat_input(
+    "Dis moi ce que tu veux faire pour animer les ptits vieux ... "
+)
 
+# Traitement du message
 if user_input:
+    # Afficher le message de l'utilisateur
     st.session_state.messages.append({"role": "user", "text": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    response_stream = st.session_state.chat.send_message_stream(user_input)
-    partial = ""
-    with st.chat_message("assistant"):
-        placeholder = st.empty()
-        for chunk in response_stream:
-            partial += chunk.text
-            placeholder.markdown(partial + "▌")
-    st.session_state.messages.append({"role": "assistant", "text": partial})
+    # Obtenir la réponse de Gemini
+    response = st.session_state.chat.send_message(user_input)
 
-# ───────── 6. Réinitialisation de la session ───────────
-if st.button("🔄 Réinitialiser le bot"):
+    # Afficher la réponse du bot
+    st.session_state.messages.append({"role": "assistant", "text": response.text})
+    with st.chat_message("assistant"):
+        st.markdown(response.text)
+
+# Bouton de réinitialisation en dessous de la zone de texte du chatbot
+if st.button("Réinitialiser le ChatBot  🤖", key="reset_button"):
     st.session_state.chat = init_chat()
     st.session_state.messages = [
-        {"role": "assistant", "text": "Bot réinitialisé. Posez une nouvelle question."},
+        {
+            "role": "assistant",
+            "text": "Comment puis-je vous aider aujourdh'hui Gwladys ? 🔎",
+        }
     ]
+    st.rerun()
